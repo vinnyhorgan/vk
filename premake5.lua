@@ -43,6 +43,8 @@ project "vk"
       "_GLFW_WIN32",
     }
 
+    files { "vk.rc" }
+
     links { "dwmapi" }
 
   filter "configurations:debug"
