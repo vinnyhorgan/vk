@@ -2,4 +2,8 @@
   "[c]": {
     "editor.formatOnSave": true,
   },
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/vendor/glfw/include",
+    "${env:VULKAN_SDK}/Include",
+  ],
 }
