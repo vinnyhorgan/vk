@@ -29,6 +29,8 @@ project "vk"
       "_GLFW_WIN32",
     }
 
+    links { "dwmapi" }
+
   filter "configurations:debug"
     defines { "DEBUG" }
     symbols "on"
