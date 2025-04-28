@@ -19,6 +19,13 @@
 #define HEIGHT 480
 #define NAME "Vk by Vinny"
 
+#define FAIL_AND_CLEANUP(msg)      \
+  do {                             \
+    printf("[ERROR] %s\n", (msg)); \
+    exit_code = 1;                 \
+    goto cleanup;                  \
+  } while (0)
+
 static const char* validation_layers[] = {
     "VK_LAYER_KHRONOS_validation",
 };
@@ -54,10 +61,20 @@ static void destroy_debug_utils_messenger_ext(VkInstance instance,
 
 static bool check_validation_layer_support() {
   uint32_t layer_count = 0;
-  vkEnumerateInstanceLayerProperties(&layer_count, NULL);
+
+  if (vkEnumerateInstanceLayerProperties(&layer_count, NULL) != VK_SUCCESS) {
+    return false;
+  }
 
   VkLayerProperties* available_layers = malloc(sizeof(VkLayerProperties) * layer_count);
-  vkEnumerateInstanceLayerProperties(&layer_count, available_layers);
+  if (available_layers == NULL) {
+    return false;
+  }
+
+  if (vkEnumerateInstanceLayerProperties(&layer_count, available_layers) != VK_SUCCESS) {
+    free(available_layers);
+    return false;
+  }
 
   for (uint32_t i = 0; i < sizeof(validation_layers) / sizeof(validation_layers[0]); i++) {
     bool layer_found = false;
@@ -79,26 +96,32 @@ static bool check_validation_layer_support() {
   return true;
 }
 
-static const char* get_required_extensions(uint32_t* count) {
+static const char** get_required_extensions(uint32_t* count) {
   uint32_t glfw_ext_count = 0;
   const char** glfw_exts = glfwGetRequiredInstanceExtensions(&glfw_ext_count);
-
   if (glfw_ext_count == 0) {
-    printf("failed to get required instance extensions\n");
     return NULL;
   }
 
   if (enable_validation_layers) {
     *count = glfw_ext_count + 1;
     const char** extensions = malloc(sizeof(const char*) * (*count));
+    if (extensions == NULL) {
+      return NULL;
+    }
+
     memcpy(extensions, glfw_exts, sizeof(const char*) * glfw_ext_count);
     extensions[glfw_ext_count] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-    return (const char*)extensions;
+    return extensions;
   } else {
     *count = glfw_ext_count;
     const char** extensions = malloc(sizeof(const char*) * (*count));
+    if (extensions == NULL) {
+      return NULL;
+    }
+
     memcpy(extensions, glfw_exts, sizeof(const char*) * glfw_ext_count);
-    return (const char*)extensions;
+    return extensions;
   }
 }
 
@@ -128,6 +151,7 @@ static void glfw_error_cb(int error_code, const char* description) {
 int main() {
   int exit_code = 0;
 
+  bool glfw_initialized = false;
   GLFWwindow* window = NULL;
   VkInstance instance = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT debug_messenger = VK_NULL_HANDLE;
@@ -136,10 +160,10 @@ int main() {
   glfwSetErrorCallback(glfw_error_cb);
 
   if (glfwInit() == GLFW_FALSE) {
-    printf("failed to initialize glfw\n");
-    exit_code = 1;
-    goto cleanup;
+    FAIL_AND_CLEANUP("failed to initialize glfw");
   }
+
+  glfw_initialized = true;
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -147,16 +171,12 @@ int main() {
 
   window = glfwCreateWindow(WIDTH, HEIGHT, NAME, NULL, NULL);
   if (window == NULL) {
-    printf("failed to create window\n");
-    exit_code = 1;
-    goto cleanup;
+    FAIL_AND_CLEANUP("failed to create window");
   }
 
   // setup vulkan...
   if (enable_validation_layers && !check_validation_layer_support()) {
-    printf("validation layers requested, but not available\n");
-    exit_code = 1;
-    goto cleanup;
+    FAIL_AND_CLEANUP("validation layers requested, but not available");
   }
 
   VkApplicationInfo app_info = {0};
@@ -172,10 +192,13 @@ int main() {
   create_info.pApplicationInfo = &app_info;
 
   uint32_t ext_count = 0;
-  const char* exts = get_required_extensions(&ext_count);
+  const char** exts = get_required_extensions(&ext_count);
+  if (exts == NULL) {
+    FAIL_AND_CLEANUP("failed to get required extensions");
+  }
 
   create_info.enabledExtensionCount = ext_count;
-  create_info.ppEnabledExtensionNames = (const char* const*)exts;
+  create_info.ppEnabledExtensionNames = exts;
 
   VkDebugUtilsMessengerCreateInfoEXT debug_create_info = {0};
   if (enable_validation_layers) {
@@ -190,9 +213,7 @@ int main() {
   }
 
   if (vkCreateInstance(&create_info, NULL, &instance) != VK_SUCCESS) {
-    printf("failed to create vulkan instance\n");
-    exit_code = 1;
-    goto cleanup;
+    FAIL_AND_CLEANUP("failed to create vulkan instance");
   }
 
   // setup debug messenger
@@ -201,18 +222,14 @@ int main() {
     populate_debug_messenger_create_info(&create_info);
 
     if (create_debug_utils_messenger_ext(instance, &create_info, NULL, &debug_messenger) != VK_SUCCESS) {
-      printf("failed to set up debug messenger\n");
-      exit_code = 1;
-      goto cleanup;
+      FAIL_AND_CLEANUP("failed to set up debug messenger");
     }
   }
 
   // finish window setup
   HWND hwnd = glfwGetWin32Window(window);
   if (hwnd == NULL) {
-    printf("failed to get window handle\n");
-    exit_code = 1;
-    goto cleanup;
+    FAIL_AND_CLEANUP("failed to get window handle");
   }
 
   BOOL dark = TRUE;
@@ -243,7 +260,7 @@ cleanup:
     glfwDestroyWindow(window);
   }
 
-  if (glfwInit() == GLFW_TRUE) {
+  if (glfw_initialized) {
     glfwTerminate();
   }
 
