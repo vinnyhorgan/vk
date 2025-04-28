@@ -133,7 +133,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugUtilsMessageSeverity
   return VK_FALSE;
 }
 
-void populate_debug_messenger_create_info(VkDebugUtilsMessengerCreateInfoEXT* create_info) {
+static void populate_debug_messenger_create_info(VkDebugUtilsMessengerCreateInfoEXT* create_info) {
   create_info->sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
   create_info->messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
                                  VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
@@ -142,6 +142,10 @@ void populate_debug_messenger_create_info(VkDebugUtilsMessengerCreateInfoEXT* cr
                              VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                              VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
   create_info->pfnUserCallback = debug_callback;
+}
+
+static bool is_device_suitable(VkPhysicalDevice device) {
+  return true;
 }
 
 static void glfw_error_cb(int error_code, const char* description) {
@@ -155,6 +159,7 @@ int main() {
   GLFWwindow* window = NULL;
   VkInstance instance = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT debug_messenger = VK_NULL_HANDLE;
+  VkPhysicalDevice physical_device = VK_NULL_HANDLE;
 
   // setup glfw
   glfwSetErrorCallback(glfw_error_cb);
@@ -225,6 +230,43 @@ int main() {
       FAIL_AND_CLEANUP("failed to set up debug messenger");
     }
   }
+
+  // pick gpu
+  uint32_t gpu_count = 0;
+  if (vkEnumeratePhysicalDevices(instance, &gpu_count, NULL) != VK_SUCCESS) {
+    FAIL_AND_CLEANUP("failed to enumerate physical devices");
+  }
+
+  if (gpu_count == 0) {
+    FAIL_AND_CLEANUP("failed to find GPUs with vulkan support");
+  }
+
+  VkPhysicalDevice* gpus = malloc(sizeof(VkPhysicalDevice) * gpu_count);
+  if (gpus == NULL) {
+    FAIL_AND_CLEANUP("failed to allocate memory for GPUs");
+  }
+
+  if (vkEnumeratePhysicalDevices(instance, &gpu_count, gpus) != VK_SUCCESS) {
+    FAIL_AND_CLEANUP("failed to enumerate physical devices");
+  }
+
+  for (uint32_t i = 0; i < gpu_count; i++) {
+    if (is_device_suitable(gpus[i])) {
+      physical_device = gpus[i];
+
+      VkPhysicalDeviceProperties device_properties;
+      vkGetPhysicalDeviceProperties(physical_device, &device_properties);
+      printf("selected GPU: %s\n", device_properties.deviceName);
+
+      break;
+    }
+  }
+
+  if (physical_device == VK_NULL_HANDLE) {
+    FAIL_AND_CLEANUP("failed to find a suitable GPU");
+  }
+
+  free(gpus);
 
   // finish window setup
   HWND hwnd = glfwGetWin32Window(window);
