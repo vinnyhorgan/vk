@@ -36,6 +36,7 @@ static const bool enable_validation_layers = false;
 static const bool enable_validation_layers = true;
 #endif
 
+// utility functions
 static VkResult create_debug_utils_messenger_ext(VkInstance instance,
                                                  const VkDebugUtilsMessengerCreateInfoEXT* p_create_info,
                                                  const VkAllocationCallbacks* p_allocator,
@@ -144,8 +145,36 @@ static void populate_debug_messenger_create_info(VkDebugUtilsMessengerCreateInfo
   create_info->pfnUserCallback = debug_callback;
 }
 
+static uint32_t find_queue_families(VkPhysicalDevice device) {
+  uint32_t indices = -1;
+
+  uint32_t queue_family_count = 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, NULL);
+
+  VkQueueFamilyProperties* queue_families = malloc(sizeof(VkQueueFamilyProperties) * queue_family_count);
+  if (queue_families == NULL) {
+    return indices;
+  }
+
+  vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, queue_families);
+
+  for (uint32_t i = 0; i < queue_family_count; i++) {
+    if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+      indices = i;
+    }
+
+    if (indices >= 0) {
+      break;
+    }
+  }
+
+  free(queue_families);
+  return indices;
+}
+
 static bool is_device_suitable(VkPhysicalDevice device) {
-  return true;
+  uint32_t indices = find_queue_families(device);
+  return indices >= 0;
 }
 
 static void glfw_error_cb(int error_code, const char* description) {
