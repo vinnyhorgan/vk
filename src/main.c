@@ -38,6 +38,14 @@ static const bool enable_validation_layers = false;
 static const bool enable_validation_layers = true;
 #endif
 
+typedef struct {
+  bool graphics_family_has_value;
+  uint32_t graphics_family;
+
+  bool present_family_has_value;
+  uint32_t present_family;
+} QueueFamilyIndices;
+
 // utility functions
 static VkResult create_debug_utils_messenger_ext(VkInstance instance,
                                                  const VkDebugUtilsMessengerCreateInfoEXT* p_create_info,
@@ -145,10 +153,15 @@ static void populate_debug_messenger_create_info(VkDebugUtilsMessengerCreateInfo
                              VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                              VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
   create_info->pfnUserCallback = debug_callback;
+  create_info->pNext = NULL;
 }
 
-static uint32_t find_queue_families(VkPhysicalDevice device) {
-  uint32_t indices = -1;
+static bool is_complete(QueueFamilyIndices* indices) {
+  return indices->graphics_family_has_value && indices->present_family_has_value;
+}
+
+static QueueFamilyIndices find_queue_families(VkSurfaceKHR surface, VkPhysicalDevice device) {
+  QueueFamilyIndices indices = {0};
 
   uint32_t queue_family_count = 0;
   vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, NULL);
@@ -162,10 +175,22 @@ static uint32_t find_queue_families(VkPhysicalDevice device) {
 
   for (uint32_t i = 0; i < queue_family_count; i++) {
     if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-      indices = i;
+      indices.graphics_family = i;
+      indices.graphics_family_has_value = true;
     }
 
-    if (indices >= 0) {
+    VkBool32 present_support = false;
+    if (vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &present_support) != VK_SUCCESS) {
+      free(queue_families);
+      return indices;
+    }
+
+    if (present_support) {
+      indices.present_family = i;
+      indices.present_family_has_value = true;
+    }
+
+    if (is_complete(&indices)) {
       break;
     }
   }
@@ -174,9 +199,9 @@ static uint32_t find_queue_families(VkPhysicalDevice device) {
   return indices;
 }
 
-static bool is_device_suitable(VkPhysicalDevice device) {
-  uint32_t indices = find_queue_families(device);
-  return indices >= 0;
+static bool is_device_suitable(VkSurfaceKHR surface, VkPhysicalDevice device) {
+  QueueFamilyIndices indices = find_queue_families(surface, device);
+  return is_complete(&indices);
 }
 
 static void glfw_error_cb(int error_code, const char* description) {
@@ -188,12 +213,20 @@ int main() {
 
   bool glfw_initialized = false;
   GLFWwindow* window = NULL;
+
   VkInstance instance = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT debug_messenger = VK_NULL_HANDLE;
-  VkPhysicalDevice physical_device = VK_NULL_HANDLE;
+  VkSurfaceKHR surface = VK_NULL_HANDLE;
 
+  VkPhysicalDevice physical_device = VK_NULL_HANDLE;
   VkDevice device = VK_NULL_HANDLE;
+
   VkQueue graphics_queue = VK_NULL_HANDLE;
+  VkQueue present_queue = VK_NULL_HANDLE;
+
+  VkPhysicalDevice* gpus = NULL;
+
+  const char** exts = NULL;
 
   // setup glfw
   glfwSetErrorCallback(glfw_error_cb);
@@ -231,7 +264,7 @@ int main() {
   create_info.pApplicationInfo = &app_info;
 
   uint32_t ext_count = 0;
-  const char** exts = get_required_extensions(&ext_count);
+  exts = get_required_extensions(&ext_count);
   if (exts == NULL) {
     FAIL_AND_CLEANUP("failed to get required extensions");
   }
@@ -257,12 +290,14 @@ int main() {
 
   // setup debug messenger
   if (enable_validation_layers) {
-    VkDebugUtilsMessengerCreateInfoEXT create_info = {0};
-    populate_debug_messenger_create_info(&create_info);
-
     if (create_debug_utils_messenger_ext(instance, &create_info, NULL, &debug_messenger) != VK_SUCCESS) {
       FAIL_AND_CLEANUP("failed to set up debug messenger");
     }
+  }
+
+  // create surface
+  if (glfwCreateWindowSurface(instance, window, NULL, &surface) != VK_SUCCESS) {
+    FAIL_AND_CLEANUP("failed to create window surface");
   }
 
   // pick gpu
@@ -275,7 +310,7 @@ int main() {
     FAIL_AND_CLEANUP("failed to find GPUs with vulkan support");
   }
 
-  VkPhysicalDevice* gpus = malloc(sizeof(VkPhysicalDevice) * gpu_count);
+  gpus = malloc(sizeof(VkPhysicalDevice) * gpu_count);
   if (gpus == NULL) {
     FAIL_AND_CLEANUP("failed to allocate memory for GPUs");
   }
@@ -285,7 +320,7 @@ int main() {
   }
 
   for (uint32_t i = 0; i < gpu_count; i++) {
-    if (is_device_suitable(gpus[i])) {
+    if (is_device_suitable(surface, gpus[i])) {
       physical_device = gpus[i];
 
       VkPhysicalDeviceProperties device_properties;
@@ -300,30 +335,39 @@ int main() {
     FAIL_AND_CLEANUP("failed to find a suitable GPU");
   }
 
-  free(gpus);
-
   // create logical device
-  uint32_t queue_family_index = find_queue_families(physical_device);
-  if (queue_family_index == -1) {
-    FAIL_AND_CLEANUP("failed to find a suitable queue family");
+  QueueFamilyIndices indices = find_queue_families(surface, physical_device);
+
+  uint32_t unique_queue_families[2];
+  uint32_t unique_count = 0;
+
+  if (indices.graphics_family_has_value) {
+    unique_queue_families[unique_count++] = indices.graphics_family;
   }
 
-  VkDeviceQueueCreateInfo queue_create_info = {0};
-  queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-  queue_create_info.queueFamilyIndex = queue_family_index;
-  queue_create_info.queueCount = 1;
+  if (indices.present_family_has_value && indices.present_family != indices.graphics_family) {
+    unique_queue_families[unique_count++] = indices.present_family;
+  }
 
   float queue_priority = 1.0f;
-  queue_create_info.pQueuePriorities = &queue_priority;
+  VkDeviceQueueCreateInfo queue_create_infos[2];
+
+  for (uint32_t i = 0; i < unique_count; i++) {
+    queue_create_infos[i].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue_create_infos[i].pNext = NULL;
+    queue_create_infos[i].flags = 0;
+    queue_create_infos[i].queueFamilyIndex = unique_queue_families[i];
+    queue_create_infos[i].queueCount = 1;
+    queue_create_infos[i].pQueuePriorities = &queue_priority;
+  }
 
   VkPhysicalDeviceFeatures device_features = {0};
 
   VkDeviceCreateInfo device_create_info = {0};
   device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 
-  device_create_info.pQueueCreateInfos = &queue_create_info;
-  device_create_info.queueCreateInfoCount = 1;
-
+  device_create_info.queueCreateInfoCount = unique_count;
+  device_create_info.pQueueCreateInfos = queue_create_infos;
   device_create_info.pEnabledFeatures = &device_features;
 
   device_create_info.enabledExtensionCount = 0;
@@ -339,7 +383,8 @@ int main() {
     FAIL_AND_CLEANUP("failed to create logical device");
   }
 
-  vkGetDeviceQueue(device, queue_family_index, 0, &graphics_queue);
+  vkGetDeviceQueue(device, indices.graphics_family, 0, &graphics_queue);
+  vkGetDeviceQueue(device, indices.present_family, 0, &present_queue);
 
   // finish window setup
 
@@ -362,6 +407,10 @@ int main() {
 
   // cleanup
 cleanup:
+  if (gpus != NULL) {
+    free(gpus);
+  }
+
   if (device != VK_NULL_HANDLE) {
     vkDestroyDevice(device, NULL);
   }
@@ -372,6 +421,10 @@ cleanup:
 
   if (enable_validation_layers && debug_messenger != VK_NULL_HANDLE) {
     destroy_debug_utils_messenger_ext(instance, debug_messenger, NULL);
+  }
+
+  if (surface != VK_NULL_HANDLE) {
+    vkDestroySurfaceKHR(instance, surface, NULL);
   }
 
   if (instance != VK_NULL_HANDLE) {
