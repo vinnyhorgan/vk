@@ -19,23 +19,24 @@ project "vk"
     "vendor/glfw/src/*.c",
   }
 
-  local vulkan_sdk = os.getenv("VULKAN_SDK")
-  if not vulkan_sdk then
-    error("VULKAN_SDK environment variable is not set")
-  end
-
   includedirs {
     "vendor/glfw/include",
-    path.join(vulkan_sdk, "Include"),
   }
 
-  libdirs {
-    path.join(vulkan_sdk, "Lib"),
-  }
+  if os.host() == "windows" then
+    local vulkan_sdk = os.getenv("VULKAN_SDK")
+    if not vulkan_sdk then
+      error("VULKAN_SDK environment variable is not set")
+    end
 
-  links {
-    "vulkan-1",
-  }
+    includedirs {
+      path.join(vulkan_sdk, "Include"),
+    }
+
+    libdirs {
+      path.join(vulkan_sdk, "Lib"),
+    }
+  end
 
   filter "system:windows"
     defines {
@@ -45,7 +46,20 @@ project "vk"
 
     files { "vk.rc" }
 
-    links { "dwmapi" }
+    links {
+      "vulkan-1",
+      "dwmapi",
+    }
+
+  filter "system:linux"
+    defines {
+      "_GLFW_X11",
+    }
+
+    links {
+      "m",
+      "vulkan",
+    }
 
   filter "configurations:debug"
     defines { "DEBUG" }

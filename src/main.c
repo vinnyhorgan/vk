@@ -7,12 +7,14 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
 #include <dwmapi.h>
 
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
 #endif
 
 #define WIDTH 640
@@ -340,6 +342,8 @@ int main() {
   vkGetDeviceQueue(device, queue_family_index, 0, &graphics_queue);
 
   // finish window setup
+
+#ifdef _WIN32
   HWND hwnd = glfwGetWin32Window(window);
   if (hwnd == NULL) {
     FAIL_AND_CLEANUP("failed to get window handle");
@@ -347,6 +351,7 @@ int main() {
 
   BOOL dark = TRUE;
   DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+#endif
 
   glfwShowWindow(window);
 
