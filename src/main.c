@@ -190,6 +190,9 @@ int main() {
   VkDebugUtilsMessengerEXT debug_messenger = VK_NULL_HANDLE;
   VkPhysicalDevice physical_device = VK_NULL_HANDLE;
 
+  VkDevice device = VK_NULL_HANDLE;
+  VkQueue graphics_queue = VK_NULL_HANDLE;
+
   // setup glfw
   glfwSetErrorCallback(glfw_error_cb);
 
@@ -297,6 +300,45 @@ int main() {
 
   free(gpus);
 
+  // create logical device
+  uint32_t queue_family_index = find_queue_families(physical_device);
+  if (queue_family_index == -1) {
+    FAIL_AND_CLEANUP("failed to find a suitable queue family");
+  }
+
+  VkDeviceQueueCreateInfo queue_create_info = {0};
+  queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+  queue_create_info.queueFamilyIndex = queue_family_index;
+  queue_create_info.queueCount = 1;
+
+  float queue_priority = 1.0f;
+  queue_create_info.pQueuePriorities = &queue_priority;
+
+  VkPhysicalDeviceFeatures device_features = {0};
+
+  VkDeviceCreateInfo device_create_info = {0};
+  device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+
+  device_create_info.pQueueCreateInfos = &queue_create_info;
+  device_create_info.queueCreateInfoCount = 1;
+
+  device_create_info.pEnabledFeatures = &device_features;
+
+  device_create_info.enabledExtensionCount = 0;
+
+  if (enable_validation_layers) {
+    device_create_info.enabledLayerCount = sizeof(validation_layers) / sizeof(validation_layers[0]);
+    device_create_info.ppEnabledLayerNames = validation_layers;
+  } else {
+    device_create_info.enabledLayerCount = 0;
+  }
+
+  if (vkCreateDevice(physical_device, &device_create_info, NULL, &device) != VK_SUCCESS) {
+    FAIL_AND_CLEANUP("failed to create logical device");
+  }
+
+  vkGetDeviceQueue(device, queue_family_index, 0, &graphics_queue);
+
   // finish window setup
   HWND hwnd = glfwGetWin32Window(window);
   if (hwnd == NULL) {
@@ -315,6 +357,10 @@ int main() {
 
   // cleanup
 cleanup:
+  if (device != VK_NULL_HANDLE) {
+    vkDestroyDevice(device, NULL);
+  }
+
   if (exts != NULL) {
     free((void*)exts);
   }
